@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# PyInstaller
+build/
+dist/
+*.manifest
+
+# Binarios (se geram via .bat, nao versionam)
+*.exe
+
+# Cache / dados locais regeneraveis
+capas/*
+!capas/.gitkeep
+downloads/
+*.part
+.baixador-manifest.json
+
+# Eclipse / editores
+.settings/
+.classpath
+.vscode/
+*.pyc

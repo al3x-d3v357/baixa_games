@@ -1,92 +1,86 @@
-# Baixador Universal — por nome (lista ou manual)
+# 🎮 Catálogo PSP — 2207 jogos (com download)
 
-Coloque um **site**, ele **analisa a página**, procura arquivos pelo **nome**
-(via `lista.txt` ou digitado manual), **clica no download** e salva numa
-**pastinha com o formato correto** (`.iso`, `.zip`, `.pdf`...).
+Programa + arquivos de catálogo com **todos os jogos de PSP do romsgames.net**
+(62 páginas lidas em 05/10/2026). Busque, marque com ✓ e baixe **um, vários ou TODOS**,
+com resume, pausa e anti-duplicado.
 
-## 1. Programa local (sem instalar nada, 2 cliques)
+## Arquivos do catálogo (já prontos — pode baixar / abrir direto)
 
-- `BaixadorUniversal.exe` — programa pronto, só dar 2 cliques
-- `Baixador.bat` — alternativa: abre com Python local
+| Arquivo | O que é |
+|---|---|
+| `catalogo-psp.json` | Base completa: 2207 jogos com título + URL + capa |
+| `catalogo-psp.html` | Catálogo navegável offline: abra no navegador, busque e clique em “Página do jogo” |
+| `catalogo-psp.csv` | Planilha (título;url;capa) — abre no Excel |
+| `jogos-psp.txt` | Um título por linha (2207 linhas) |
+| `app.py` | Programa catálogo (interface dark) |
+| `gerar_catalogo.py` | Re-gera tudo do zero lendo as 62 páginas |
+
+## 1. Usar o programa (2 cliques, sem instalar nada)
+
+- **`Catalogo-PSP.bat`** — abre o catálogo (recomendado)
+- `Baixador.bat` — mesmo programa (atalho antigo)
 - Arquivos baixados vão para `downloads/` ao lado do programa
 
-Para gerar o .exe de novo: 2 cliques em `Gerar-EXE.bat` (saída em `dist/`).
+Aba **🗂 Catálogo (2207)** (já abre nela):
+1. O catálogo embutido carrega sozinho — digite na busca (ex: `god of war`)
+2. Marque com ✓ (ou `✓ Todos`), clique **⬇ Baixar marcados**
+3. **⬇⬇ Baixar TUDO** baixa os visíveis (com confirmação — o pack inteiro passa de 1 TB!)
+4. **📤 Exportar** salva marcados/visíveis em TXT, CSV ou HTML
+5. `🌐 Atualizar do site` relê as 62 páginas (demora ~3 min); `🔄 Atualizar status` recruza com sua pasta (badge ✓ BAIXADO)
+6. Aba **💾 Meus jogos**: o que já baixou + tamanho total + `.part` incompletos (dá p/ continuar)
 
-## 2. Rodar com Python
+Para gerar o `.exe`: 2 cliques em `Gerar-EXE.bat` → sai `dist/CatalogoPSP.exe`
+(com o catálogo de 2207 embutido).
+
+## 2. Regenerar o catálogo do zero
+
+```bash
+pip install -r requirements.txt
+py gerar_catalogo.py        # lê as 62 páginas (~3 min) e reescreve json+html+csv+txt
+Gerar-Catalogo.bat          # mesmo, por 2 cliques
+```
+
+## 3. Rodar com Python
 
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
-Interface dark moderna (`customtkinter`): cabeçalho com status,
-cards de origem/destino, switches de Resume e Pular-já-baixados,
-lista de encontrados com ✓ (botões Todos/Nenhum), barra de progresso
-do arquivo + do lote, e log escuro.
-
-## 2b. Abas: Catálogo e Meus jogos
-
-- **🗂 Catálogo** — `🌐 Carregar catálogo do site` lê as páginas do site
-  (escolha 1–10 páginas ou tudo) e lista **todos os jogos com capa, título e busca**.
-  Cada jogo mostra badge **✓ BAIXADO** se o cruzamento com a sua pasta
-  achar o arquivo (tolera acento, `:`→`_`, `(USA)` etc.). Marque com ✓ e
-  clique **Baixar marcados**; **🔍 Detalhes** mostra região, tamanho e nota.
-  O catálogo fica em cache (`catalogo-psp.json`, capas em `capas/`) para abrir na hora.
-- **💾 Meus jogos** — escaneia a pasta `downloads/`: quantos jogos, espaço
-  total, data de cada um e `.part` incompletos (dá p/ continuar). Botão
-  **📁 Abrir pasta** e **🔄 Atualizar** (também atualiza sozinho após baixar).
-
-Via terminal:
+## 4. Via terminal
 
 ```bash
 # ver o que já foi baixado
 python cli.py --meus-jogos --saida downloads
 
-# listar o catálogo do site com status BAIXADO/novo (1 página + busca)
-python cli.py --catalogo 1 --busca "god of war" \
-  --url https://www.romsgames.net/roms/playstation-portable/ --saida downloads
-```
+# listar do cache embutido (sem reler o site) + busca
+python cli.py --catalogo 0 --busca "god of war" --saida downloads
 
-1. Cole o **Site** e clique **Analisar site**
-2. Digite os nomes (um por linha) OU clique **Carregar lista.txt**
-3. Em extensões deixe `.iso` ou apague para **qualquer tipo**
-4. Clique **Buscar na página** → selecione → **Baixar selecionados**
-5. Arquivos vão para `downloads/` com nome + extensão corretos
+# reler o site (62 páginas, lento) e exportar
+python cli.py --catalogo 0 --atualizar --exportar jogos.csv --busca "naruto"
 
-## 3. Usar via terminal
+# exportar o catálogo inteiro filtrado
+python cli.py --exportar todos.txt --busca "" --saida downloads
 
-```bash
-# manual
-python cli.py --url https://exemplo.com/downloads --manual "ubuntu,debian" --ext .iso
+# BAIXAR TUDO do catálogo (respeita --busca; pede confirmação; >1 TB no total!)
+python cli.py --baixar-catalogo --saida downloads
+python cli.py --baixar-catalogo --busca "tekken" --limite 5 --saida downloads
 
-# via lista
-python cli.py --url https://exemplo.com/downloads --lista lista.txt --ext .iso --saida downloads
-
-# qualquer tipo de arquivo
-python cli.py --url https://exemplo.com/downloads --lista lista.txt --saida downloads
+# baixar por lista/manual (modo antigo, 1 página só)
+python cli.py --url https://www.romsgames.net/roms/playstation-portable/ --lista lista.txt --saida downloads
+python cli.py --url https://www.romsgames.net/roms/playstation-portable/ --manual "tekken 6, god of war" --saida downloads
 ```
 
 ## Como funciona
 
-- `downloader.py:analisar_site` — baixa o HTML e extrai `<a href>`, `data-url`, `src`
-- `downloader.py:filtrar_por_nomes` — busca parcial, sem acento/case, + filtro `.iso,.zip` (dedup por URL)
-- `downloader.py:baixar_inteligente` — resolve página → botão → arquivo (nunca salva `.html`),
-  descobre a extensão real via URL → `Content-Disposition` → `Content-Type`
-- `downloader.py:pular_ja_baixados` — anti-duplicado: confere pasta + `.baixador-manifest.json`
-  e pula quem já foi baixado (sem baixar 2x)
-- Resume: baixa em `nome.zip.part` com `Range`; pausa, queda de rede ou Ctrl+C
-  continua de onde parou. Servidor sem `Range` recomeça do zero sozinho.
-- `ControleDownload` — GUI tem ⏸ Pausar / ▶ Continuar / ✖ Cancelar (o `.part` é mantido)
-
-```bash
-# CLI: pula existentes + resume (padrão); Ctrl+C pausa e mantém .part
-python cli.py --url https://exemplo.com/downloads --lista lista.txt --saida downloads
-
-# desliga resume / força baixar tudo de novo
-python cli.py --url https://exemplo.com/downloads --lista lista.txt --sem-resume --refazer
-```
+- `downloader.py:listar_jogos_pagina` — extrai os cards (`-rom-` + `<img>`) de uma página
+- `downloader.py:carregar_catalogo` — percorre as 62 páginas até vir vazia/repetida
+- `downloader.py:baixar_inteligente` — página → botão Save Game (POST `?download`) → arquivo; nunca salva `.html`
+- Resume em `.part` + `Range`; `ControleDownload` pausa/continua/cancela; manifesto anti-duplicado
+- Cache: `catalogo-psp.json` (+ capas em `capas/`) carrega na hora; o `.exe` leva o catálogo embutido (`_MEIPASS` fallback)
 
 ## Pastas
 
-- `downloads/` — arquivos salvos (criada automaticamente)
+- `downloads/` — jogos baixados (criada automaticamente)
+- `capas/` — miniaturas em cache
 - `lista.txt` — exemplo de lista de nomes

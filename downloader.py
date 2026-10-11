@@ -914,15 +914,8 @@ def carregar_catalogo(url_base: str, max_paginas: int = 5, timeout: int = 20,
     return catalogo
 
 
-def detalhes_jogo(url_detalhe: str, timeout: int = 20) -> dict:
-    """Busca região, tamanho, nota e nº de votos na página do jogo (best-effort).
-
-    Campos ausentes vêm como "". Levanta RequestException em falha de rede.
-    """
-    r = requests.get(url_detalhe, headers=HEADERS_PADRAO, timeout=timeout,
-                     allow_redirects=True)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "lxml")
+def _detalhes_de_soup(soup, url_final: str) -> dict:
+    """Extrai título, região, tamanho, nota e capa de um soup já baixado."""
     texto = soup.get_text(" ", strip=True)
 
     titulo = ""
@@ -953,6 +946,11 @@ def detalhes_jogo(url_detalhe: str, timeout: int = 20) -> dict:
     if m:
         nota, votos = m.group(1), m.group(2)
 
+    descricao = ""
+    ogd = soup.find("meta", attrs={"property": "og:description"})
+    if ogd and ogd.get("content"):
+        descricao = " ".join(ogd["content"].split())[:800]
+
     capa = ""
     ogimg = soup.find("meta", attrs={"property": "og:image"})
     if ogimg and ogimg.get("content"):
@@ -960,9 +958,103 @@ def detalhes_jogo(url_detalhe: str, timeout: int = 20) -> dict:
     if not capa:
         img = soup.find("img", alt=re.compile(re.escape(titulo[:20]), re.I)) if titulo else None
         if img and img.get("src"):
-            capa = urljoin(r.url, img["src"])
-    return {"titulo": titulo, "url": r.url, "regiao": regiao, "tamanho": tamanho,
-            "nota": nota, "votos": votos, "capa": capa}
+            capa = urljoin(url_final, img["src"])
+    return {"titulo": titulo, "url": url_final, "regiao": regiao, "tamanho": tamanho,
+            "nota": nota, "votos": votos, "capa": capa, "descricao": descricao}
+
+
+def detalhes_jogo(url_detalhe: str, timeout: int = 20) -> dict:
+    """Busca região, tamanho, nota e nº de votos na página do jogo (best-effort).
+
+    Campos ausentes vêm como "". Levanta RequestException em falha de rede.
+    """
+    r = requests.get(url_detalhe, headers=HEADERS_PADRAO, timeout=timeout,
+                     allow_redirects=True)
+    r.raise_for_status()
+    return _detalhes_de_soup(BeautifulSoup(r.text, "lxml"), r.url)
+
+
+def navegar(url: str, timeout: int = 20) -> dict:
+    """Mini-navegador: baixa a URL uma vez e classifica o conteúdo.
+
+    Retorna {"tipo", "url_final", "jogos", "detalhe", "links", "prev", "next"}:
+    - "lista": listagem com cards de jogos (+ prev/next da paginação).
+    - "jogo": página de um jogo (detalhe p/ baixar; `jogos` traz relacionados).
+    - "links": outra página qualquer (lista genérica de links clicáveis).
+    Levanta RequestException em falha de rede.
+    """
+    r = requests.get(url, headers=HEADERS_PADRAO, timeout=timeout,
+                     allow_redirects=True)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "lxml")
+    base = r.url
+
+    jogos: list[dict] = []
+    vistos: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        href = (a["href"] or "").strip()
+        if "-rom-" not in href:  # cards de jogo têm `/...-rom-nome-do-jogo/`
+            continue
+        img = a.find("img")
+        if img is None:  # sem capa = link de navegação, não card
+            continue
+        url_abs = urljoin(base, href)
+        if url_abs in vistos:
+            continue
+        vistos.add(url_abs)
+        titulo = (a.get_text(" ", strip=True)
+                  or (img.get("alt") or "").strip()
+                  or os.path.basename(urlparse(url_abs).path).replace("-", " "))
+        capa = urljoin(base, (img.get("src") or "").strip())
+        if "no-cover" in capa:
+            capa = ""
+        titulo = " ".join(titulo.split())
+        if titulo:
+            jogos.append({"titulo": titulo[:200], "url": url_abs, "capa": capa})
+
+    prev = next_ = None
+    for a in soup.find_all("a", href=True):
+        href = (a["href"] or "").strip()
+        if "page=" not in href:
+            continue
+        txt = (a.get_text(" ", strip=True) or "").lower()
+        absu = urljoin(base, href)
+        if txt in ("previous", "prev", "anterior", "«", "‹", "<", "←") and prev is None:
+            prev = absu
+        elif txt in ("next", "proximo", "próximo", "seguinte",
+                     "»", "›", ">", "→") and next_ is None:
+            next_ = absu
+
+    detalhe = _detalhes_de_soup(soup, base)
+    eh_pagina_jogo = "-rom-" in urlparse(base).path
+
+    links: list[dict] = []
+    if not jogos and not detalhe.get("titulo"):
+        vistos_l: set[str] = set()
+        for a in soup.find_all("a", href=True):
+            href = (a["href"] or "").strip()
+            if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                continue
+            absu = urljoin(base, href)
+            if absu in vistos_l or urlparse(absu).scheme not in ("http", "https"):
+                continue
+            vistos_l.add(absu)
+            txt = (a.get_text(" ", strip=True) or "")[:80]
+            if txt:
+                links.append({"texto": txt, "url": absu})
+            if len(links) >= 150:
+                break
+
+    if jogos and not eh_pagina_jogo:
+        tipo = "lista"
+    elif eh_pagina_jogo and detalhe.get("titulo"):
+        tipo = "jogo"
+    elif jogos:
+        tipo = "lista"
+    else:
+        tipo = "links"
+    return {"tipo": tipo, "url_final": base, "jogos": jogos, "detalhe": detalhe,
+            "links": links, "prev": prev, "next": next_}
 
 
 def filtrar_catalogo(catalogo: list[dict], busca: str = "") -> list[dict]:
@@ -1046,8 +1138,19 @@ def salvar_catalogo_cache(catalogo: list[dict], pasta_cache: str | Path,
 
 
 def carregar_catalogo_cache(pasta_cache: str | Path) -> dict:
-    """Lê o cache. Ausente/corrompido -> {"jogos": [], ...} vazio."""
-    caminho = Path(pasta_cache) / NOME_CACHE_CATALOGO
+    """Lê o cache. Procura em: pasta pedida, pasta do script e _MEIPASS (exe).
+
+    Ausente/corrompido -> {"jogos": [], ...} vazio."""
+    candidatos: list[Path] = [Path(pasta_cache) / NOME_CACHE_CATALOGO]
+    try:
+        candidatos.append(Path(__file__).parent / NOME_CACHE_CATALOGO)
+    except Exception:
+        pass
+    import sys as _sys
+    meipass = getattr(_sys, "_MEIPASS", "")
+    if meipass:
+        candidatos.append(Path(meipass) / NOME_CACHE_CATALOGO)
+    caminho = next((c for c in candidatos if c.exists()), candidatos[0])
     if not caminho.exists():
         return {"jogos": [], "atualizado_em": "", "url_base": ""}
     try:
