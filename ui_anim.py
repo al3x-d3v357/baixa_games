@@ -63,31 +63,30 @@ def parar_pulso(label, cor_final="#9aa3b2"):
         pass
 
 
-def hover_card(card, borda_normal="#262b36", borda_hover="#3b82f6"):
-    """Destaque visivel ao passar o mouse no cartao do jogo."""
+def hover_card(card, borda_normal="#1e293b", borda_hover="#10e9b0"):
+    """Destaque visual leve e de alta performance ao passar o mouse.
+    
+    Não altera border_width nem itera recursivamente em filhos para não engasgar
+    o loop de eventos do Tkinter durante o scroll.
+    """
     def _enter(_e=None):
         try:
-            card.configure(border_color=borda_hover, border_width=2)
+            card.configure(border_color=borda_hover)
         except Exception:
             pass
 
     def _leave(_e=None):
         try:
-            card.configure(border_color=borda_normal, border_width=1)
+            card.configure(border_color=borda_normal)
         except Exception:
             pass
 
     try:
         card.bind("<Enter>", _enter, add="+")
         card.bind("<Leave>", _leave, add="+")
-        for filho in card.winfo_children():
-            try:
-                filho.bind("<Enter>", _enter, add="+")
-                filho.bind("<Leave>", _leave, add="+")
-            except Exception:
-                pass
     except Exception:
         pass
+
 
 
 def fade_in_modal(modal, largura_final=660, altura_final=620, passos=8, delay=18):

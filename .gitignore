@@ -26,3 +26,4 @@ downloads/
 .classpath
 .vscode/
 *.pyc
+/.metadata/

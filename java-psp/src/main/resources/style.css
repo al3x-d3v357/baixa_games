@@ -1,0 +1,82 @@
+/* Catálogo PSP — tema escuro, cards verticais 160x220. Equivale às cores do app.py */
+.root {
+    -fx-background-color: #0f1115;
+    -fx-font-family: "Segoe UI", sans-serif;
+}
+.top-bar {
+    -fx-background-color: #171a21;
+    -fx-padding: 12 16 12 16;
+    -fx-border-color: #262b36;
+    -fx-border-width: 0 0 1 0;
+}
+.logo {
+    -fx-text-fill: #38bdf8;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+}
+.muted {
+    -fx-text-fill: #9aa3b2;
+    -fx-font-size: 12px;
+}
+.search-field {
+    -fx-background-color: #0f1319;
+    -fx-text-fill: white;
+    -fx-prompt-text-fill: #64748b;
+    -fx-background-radius: 8;
+    -fx-border-color: #262b36;
+    -fx-border-radius: 8;
+    -fx-padding: 8 14 8 14;
+    -fx-font-size: 13px;
+}
+.game-card {
+    -fx-background-color: #171a21;
+    -fx-background-radius: 14;
+    -fx-border-color: #262b36;
+    -fx-border-radius: 14;
+    -fx-padding: 8;
+    -fx-cursor: hand;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.4), 8, 0, 0, 4);
+}
+.game-card:hover {
+    -fx-background-color: #1a2230;
+    -fx-border-color: #3b82f6;
+}
+.game-title {
+    -fx-text-fill: #38bdf8;
+    -fx-font-size: 12px;
+    -fx-alignment: center;
+}
+.badge-ok {
+    -fx-text-fill: #86efac;
+    -fx-background-color: #14532d;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 6;
+    -fx-padding: 1 8 1 8;
+}
+.btn-primary {
+    -fx-background-color: #16a34a;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 6;
+    -fx-padding: 6 12 6 12;
+    -fx-cursor: hand;
+}
+.btn-primary:hover {
+    -fx-background-color: #15803d;
+}
+.btn-secondary {
+    -fx-background-color: #171a21;
+    -fx-text-fill: #9aa3b2;
+    -fx-background-radius: 6;
+    -fx-border-color: #262b36;
+    -fx-border-radius: 6;
+    -fx-padding: 6 10 6 10;
+    -fx-cursor: hand;
+}
+.bottom-panel {
+    -fx-background-color: #0d151e;
+    -fx-border-color: #262b36;
+    -fx-border-width: 1 0 0 0;
+    -fx-padding: 8 16 8 16;
+}
