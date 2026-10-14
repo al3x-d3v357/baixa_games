@@ -69,7 +69,41 @@ python cli.py --baixar-catalogo --busca "tekken" --limite 5 --saida downloads
 # baixar por lista/manual (modo antigo, 1 página só)
 python cli.py --url https://www.romsgames.net/roms/playstation-portable/ --lista lista.txt --saida downloads
 python cli.py --url https://www.romsgames.net/roms/playstation-portable/ --manual "tekken 6, god of war" --saida downloads
+
+# BitTorrent (.torrent / magnet — ex: repacks FitGirl)
+python cli.py --info-torrent "Demon Slayer - The Hinokami Chronicles 2 [FitGirl HV Repack].torrent"
+python cli.py --torrent "Demon Slayer - The Hinokami Chronicles 2 [FitGirl HV Repack].torrent" --saida downloads
+python cli.py --torrent "magnet:?xt=urn:btih:..." --saida downloads
 ```
+No app: aba **🧲 Torrent** — 📂 Escolher .torrent (ou cole magnet/URL) →
+🔍 Ver info → ⬇ Iniciar (com ⏸ Pausar / ▶ Continuar / ✖ Cancelar).
+Precisa de `pip install libtorrent`; sem ele, use **↗ Abrir no cliente externo**
+(qBittorrent/Transmission).
+
+## 5. Jogos PC via GamesTorrents
+
+```bash
+python cli.py --gt-busca "demon slayer"          # busca instantanea
+python cli.py --gt-pagina 1                       # lista o catalogo (232 pags)
+python cli.py --gt-jogo https://www.gamestorrents.app/juegos-pc/mx-vs-atv-legends/
+python cli.py --gt-baixar https://www.gamestorrents.app/juegos-pc/mx-vs-atv-legends/ --gt-fonte FitGirl --saida downloads
+```
+No app: aba **🖥️ PC** — busque ou carregue o catálogo, clique **Ver ↧** no jogo
+e **⬇ Baixar torrent** no release. O app resolve o anti-bot do site
+(prepare + proof-of-work) e baixa pelo motor torrent embutido.
+
+## 6. Análise + instalação do jogo
+
+```bash
+python cli.py --analisar "dist\downloads\...\setup.exe"   # Defender + assinatura + PE
+python cli.py --deps                                       # o que falta (VC++, DX, .NET)
+python cli.py --instalar-dep dotnet8                      # instala a dependencia oficial
+python cli.py --instalar-jogo "dist\downloads\...\setup.exe" --destino "C:\Jogos\Demon Slayer"
+```
+No app: aba **🛡️ Instalar** — 1) 🔍 Localizar setups e ▶ Analisar
+(scan real do Defender, sem executar nada); 2) veja as dependências e
+⬇ Instale o que faltar (fonte oficial Microsoft); 3) escolha a pasta e
+▶ Instalar jogo (silencioso ou interativo, com atalho opcional).
 
 ## Como funciona
 

@@ -3,9 +3,14 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('catalogo-psp.json', '.'), ('capas', 'capas')]
 binaries = []
-hiddenimports = []
+hiddenimports = ['torrent_downloader', 'gamestorrents', 'instalador']
 tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+try:
+    tmp_lt = collect_all('libtorrent')
+    datas += tmp_lt[0]; binaries += tmp_lt[1]; hiddenimports += tmp_lt[2]
+except Exception:
+    pass  # libtorrent opcional: sem ele o app usa cliente externo
 
 
 a = Analysis(

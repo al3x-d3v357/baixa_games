@@ -142,6 +142,199 @@ def _cmd_baixar_catalogo(url: str, paginas: int, busca: str, pasta: str, atualiz
     return 0
 
 
+def _cmd_info_torrent(fonte: str):
+    from torrent_downloader import is_magnet, parse_torrent
+    fonte = (fonte or "").strip()
+    if is_magnet(fonte):
+        print(f"Magnet: {fonte[:100]}...")
+        print("(metadados como nome/tamanho so aparecem apos buscar peers no download.)")
+        return 0
+    try:
+        info = parse_torrent(fonte)
+    except Exception as e:
+        print(f"ERRO ao ler .torrent: {e}")
+        return 1
+    gb = info["tamanho"] / 1024 / 1024 / 1024
+    print(f"Nome: {info['nome']}")
+    print(f"Tamanho: {gb:.2f} GB ({info['tamanho']} bytes) em {info['num_arquivos']} arquivo(s)")
+    print(f"Info-hash: {info['info_hash']}")
+    print(f"Trackers: {len(info['trackers'])}")
+    for f in info["arquivos"][:20]:
+        print(f"  - {f['caminho']} ({f['bytes'] / 1024 / 1024:.1f} MB)")
+    if info["num_arquivos"] > 20:
+        print(f"  ... e mais {info['num_arquivos'] - 20}")
+    print(f"Magnet: {info['magnet'][:120]}...")
+    return 0
+
+
+def _cmd_torrent(fonte: str, pasta: str):
+    from torrent_downloader import download_torrent, is_magnet, parse_torrent
+    from downloader import ControleDownload
+    fonte = (fonte or "").strip()
+    if not is_magnet(fonte):
+        try:
+            info = parse_torrent(fonte)
+            gb = info["tamanho"] / 1024 / 1024 / 1024
+            print(f"Torrent: {info['nome']} ({gb:.2f} GB, {info['num_arquivos']} arquivo(s))")
+        except Exception as e:
+            print(f"ERRO ao ler .torrent: {e}")
+            return 1
+    else:
+        print(f"Magnet: {fonte[:80]}...")
+    print(f"Destino: ./{pasta}/ (Ctrl+C pausa; rode de novo p/ continuar)")
+    controle = ControleDownload()
+    try:
+        dest = download_torrent(
+            fonte, pasta, controle=controle,
+            callback_log=lambda m: print(f"  > {m}"),
+            callback_progress=lambda rec, tot: print(
+                f"\r  {rec / 1024 / 1024:.0f}/{tot / 1024 / 1024:.0f} MB "
+                f"({rec / tot * 100:.1f}%)" if tot else f"\r  {rec / 1024 / 1024:.0f} MB",
+                end="", flush=True),
+        )
+    except KeyboardInterrupt:
+        print("\nPAUSADO — progresso salvo na pasta. Rode de novo para continuar.")
+        return 130
+    except Exception as e:
+        print(f"\nFALHOU: {e}")
+        return 1
+    print(f"\nOK -> {dest}")
+    return 0
+
+
+def _cmd_gt_busca(termo: str):
+    from gamestorrents import buscar
+    try:
+        res = buscar(termo)
+    except Exception as e:
+        print(f"ERRO na busca: {e}")
+        return 1
+    print(f"{len(res)} resultado(s) para '{termo}':")
+    for j in res[:30]:
+        print(f"  - {j['titulo']} ({j['ano']})")
+        print(f"    {j['url']}")
+    return 0
+
+
+def _cmd_gt_pagina(n: int):
+    from gamestorrents import listar_jogos_pagina
+    try:
+        jogos, total = listar_jogos_pagina(n)
+    except Exception as e:
+        print(f"ERRO ao listar: {e}")
+        return 1
+    print(f"Pagina {n}/{total} ({len(jogos)} jogos):")
+    for j in jogos:
+        print(f"  - {j['titulo']}\n    {j['url']}")
+    return 0
+
+
+def _cmd_gt_jogo(url: str):
+    from gamestorrents import detalhes_jogo
+    try:
+        d = detalhes_jogo(url)
+    except Exception as e:
+        print(f"ERRO ao abrir jogo: {e}")
+        return 1
+    print(f"{d['titulo']}\n{d['url']}")
+    if not d["releases"]:
+        print("Sem releases com torrent.")
+        return 0
+    for i, rel in enumerate(d["releases"], 1):
+        print(f"  [{i}] {rel['fonte']} {rel['versao']} {rel['tamanho']} {rel['idiomas']}")
+    return 0
+
+
+def _cmd_gt_baixar(url: str, pasta: str, fonte: str):
+    from gamestorrents import baixar_release, detalhes_jogo
+    from downloader import ControleDownload
+    try:
+        d = detalhes_jogo(url)
+    except Exception as e:
+        print(f"ERRO ao abrir jogo: {e}")
+        return 1
+    rels = d["releases"]
+    if fonte:
+        pref = [r for r in rels if fonte.lower() in r["fonte"].lower()]
+        rels = pref or rels
+    if not rels:
+        print("Sem releases com torrent.")
+        return 1
+    rel = rels[0]
+    print(f"Release: {rel['fonte']} {rel['versao']} {rel['tamanho']}")
+    print(f"Destino: ./{pasta}/ (Ctrl+C pausa; rode de novo p/ continuar)")
+    try:
+        dest = baixar_release(rel, pasta, controle=ControleDownload(),
+                              callback_log=lambda m: print(f"  > {m}"))
+    except KeyboardInterrupt:
+        print("\nPAUSADO — progresso salvo na pasta. Rode de novo para continuar.")
+        return 130
+    except Exception as e:
+        print(f"FALHOU: {e}")
+        return 1
+    print(f"OK -> {dest}")
+    return 0
+
+
+def _cmd_analisar(exe: str, com_defender: bool):
+    from instalador import analisar_setup, texto_relatorio
+    try:
+        rep = analisar_setup(exe, com_defender=com_defender,
+                             callback_log=lambda m: print(f"  > {m}"))
+    except Exception as e:
+        print(f"ERRO na analise: {e}")
+        return 1
+    print(texto_relatorio(rep))
+    return 0 if rep.get("veredito") in ("ok", "atencao") else 2
+
+
+def _cmd_deps():
+    from instalador import detectar_dependencias
+    try:
+        deps = detectar_dependencias()
+    except Exception as e:
+        print(f"ERRO: {e}")
+        return 1
+    for d in deps:
+        tag = "INSTALADO" if d["instalado"] else "AUSENTE"
+        print(f"[{tag:>9}] {d['id']}: {d['nome']} {d.get('detalhe', '')}")
+    return 0
+
+
+def _cmd_instalar_dep(dep_id: str):
+    from instalador import detectar_dependencias, instalar_dependencia
+    deps = detectar_dependencias()
+    dep = next((d for d in deps if d["id"] == dep_id), None)
+    if dep is None:
+        print(f"Dependencia desconhecida: {dep_id} (use --deps para listar)")
+        return 1
+    if dep["instalado"]:
+        print(f"{dep['nome']} ja instalado.")
+        return 0
+    try:
+        instalar_dependencia(dep, callback_log=lambda m: print(f"  > {m}"))
+    except Exception as e:
+        print(f"FALHOU: {e}")
+        return 1
+    print(f"OK: {dep['nome']} instalado.")
+    return 0
+
+
+def _cmd_instalar_jogo(setup: str, destino: str, silencioso: bool):
+    from instalador import instalar_jogo
+    if not destino:
+        print("Informe --destino DIR (ex: --destino C:\\Jogos\\Meu Jogo)")
+        return 1
+    try:
+        res = instalar_jogo(setup, destino, silencioso,
+                            callback_log=lambda m: print(f"  > {m}"))
+    except Exception as e:
+        print(f"FALHOU: {e}")
+        return 1
+    print(f"OK: jogo instalado em {res['destino']}")
+    return 0
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -167,8 +360,58 @@ def main():
                     help="Baixa TODOS os jogos do catalogo (respeita --busca). CUIDADO: >1 TB!")
     ap.add_argument("--limite", type=int, default=0, help="Com --baixar-catalogo, baixa so os N primeiros")
     ap.add_argument("--meus-jogos", action="store_true", help="Lista o que ja foi baixado")
+    ap.add_argument("--torrent", default="", metavar="FONTE",
+                    help="Baixa via BitTorrent: caminho .torrent, magnet: ou URL de .torrent")
+    ap.add_argument("--info-torrent", default="", metavar="FONTE",
+                    help="So mostra nome/tamanho/arquivos do .torrent ou magnet (sem baixar)")
+    ap.add_argument("--gt-busca", default="", metavar="TEXTO",
+                    help="Busca jogos PC no GamesTorrents (ex: --gt-busca 'demon slayer')")
+    ap.add_argument("--gt-pagina", type=int, default=0, metavar="N",
+                    help="Lista a pagina N do catalogo GamesTorrents (/juegos-pc/)")
+    ap.add_argument("--gt-jogo", default="", metavar="URL",
+                    help="Mostra os releases (fonte/versao/tamanho) de um jogo do GamesTorrents")
+    ap.add_argument("--gt-baixar", default="", metavar="URL",
+                    help="Baixa um jogo do GamesTorrents via torrent (resolve anti-bot + motor torrent)")
+    ap.add_argument("--gt-fonte", default="", metavar="NOME",
+                    help="Com --gt-baixar, prefere o release desta fonte (ex: FitGirl). Padrao: primeiro")
+    ap.add_argument("--analisar", default="", metavar="EXE",
+                    help="Analisa um setup.exe (Defender + assinatura + PE) sem instalar")
+    ap.add_argument("--sem-defender", action="store_true",
+                    help="Com --analisar, pula o scan do Defender")
+    ap.add_argument("--deps", action="store_true",
+                    help="Lista dependencias (VC++, DirectX, .NET) e o que falta instalar")
+    ap.add_argument("--instalar-dep", default="", metavar="ID",
+                    help="Instala uma dependencia (vcx64, vcx86, dotnet8, directx)")
+    ap.add_argument("--instalar-jogo", default="", metavar="SETUP",
+                    help="Instala o jogo a partir do setup.exe (Inno Setup)")
+    ap.add_argument("--destino", default="", metavar="DIR",
+                    help="Pasta de instalacao (com --instalar-jogo). Ex: C:\\Jogos\\Meu Jogo")
+    ap.add_argument("--interativo", action="store_true",
+                    help="Com --instalar-jogo, mostra o instalador (padrao: silencioso)")
     args = ap.parse_args()
 
+    if args.analisar:
+        sys.exit(_cmd_analisar(args.analisar, not args.sem_defender))
+    if args.deps:
+        sys.exit(_cmd_deps())
+    if args.instalar_dep:
+        sys.exit(_cmd_instalar_dep(args.instalar_dep))
+    if args.instalar_jogo:
+        sys.exit(_cmd_instalar_jogo(args.instalar_jogo, args.destino, not args.interativo))
+
+    if args.gt_busca:
+        sys.exit(_cmd_gt_busca(args.gt_busca))
+    if args.gt_pagina:
+        sys.exit(_cmd_gt_pagina(args.gt_pagina))
+    if args.gt_jogo:
+        sys.exit(_cmd_gt_jogo(args.gt_jogo))
+    if args.gt_baixar:
+        sys.exit(_cmd_gt_baixar(args.gt_baixar, args.saida, args.gt_fonte))
+
+    if args.info_torrent:
+        sys.exit(_cmd_info_torrent(args.info_torrent))
+    if args.torrent:
+        sys.exit(_cmd_torrent(args.torrent, args.saida))
     if args.meus_jogos:
         sys.exit(_cmd_meus_jogos(args.saida))
     if args.baixar_catalogo:

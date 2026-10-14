@@ -4,3 +4,5 @@ lxml>=4.9.0
 customtkinter>=5.2.0
 pillow>=10.0.0
 pyinstaller>=6.0.0
+libtorrent>=2.0.0  # motor BitTorrent da aba .torrent/magnet (se falhar no pip, use o cliente externo)
+pefile>=2024.8.26  # analise estatica do setup.exe na aba Instalar (opcional)

@@ -39,6 +39,29 @@ from downloader import (
     ja_baixado,
     navegar,
 )
+from torrent_downloader import (
+    abrir_com_cliente_externo,
+    download_torrent,
+    is_magnet,
+    is_torrent_url,
+    libtorrent_disponivel,
+    parse_torrent,
+)
+from gamestorrents import (
+    baixar_release,
+    buscar as gt_buscar,
+    detalhes_jogo as gt_detalhes,
+    listar_jogos_pagina as gt_listar,
+)
+from instalador import (
+    analisar_setup,
+    criar_atalho,
+    detectar_dependencias,
+    instalar_dependencia,
+    instalar_jogo,
+    localizar_setups,
+    texto_relatorio,
+)
 from ui_anim import (
     animar_spinner,
     fade_in_modal,
@@ -244,6 +267,27 @@ class App(ctk.CTk):
         self.var_pular = ctk.BooleanVar(value=True)
         self._fila_expandida = False
 
+        # Estado da aba Torrent (.torrent / magnet)
+        self.torrent_fonte: str = ""
+        self.torrent_info: dict | None = None
+        self.torrent_controle: ControleDownload | None = None
+        self.torrent_rodando = False
+        self.torrent_rec = 0
+        self.torrent_tot = 0
+
+        # Estado da aba PC (GamesTorrents)
+        self.gt_resultados: list[dict] = []
+        self.gt_pagina = 1
+        self.gt_total = 1
+        self.gt_releases: list[dict] = []
+        self.gt_titulo = ""
+
+        # Estado da aba Instalar
+        self.inst_setup: str = ""
+        self.inst_deps: list[dict] = []
+        self.inst_rodando = False
+        self.inst_destino_final: str = ""
+
         self._montar_tela()
         self.after(120, self._processar_fila)
         self._carregar_cache_inicial()
@@ -319,7 +363,7 @@ class App(ctk.CTk):
 
         self.seg_abas = ctk.CTkSegmentedButton(
             nav_actions,
-            values=["🎮 ROMs", "🌐 Navegador", "💾 Baixados"],
+            values=["🎮 ROMs", "🌐 Navegador", "💾 Baixados", "🧲 Torrent", "🖥️ PC", "🛡️ Instalar"],
             command=self._aba_mudou_seg,
             font=FONTE_PEQ,
             selected_color=COR_ROMSGAMES_MINT,
@@ -482,10 +526,16 @@ class App(ctk.CTk):
         self.tab_catalogo = self.tabs.add("🎮 ROMs")
         self.tab_nav = self.tabs.add("🌐 Navegador")
         self.tab_meus = self.tabs.add("💾 Baixados")
+        self.tab_torrent = self.tabs.add("🧲 Torrent")
+        self.tab_pc = self.tabs.add("🖥️ PC")
+        self.tab_inst = self.tabs.add("🛡️ Instalar")
 
         self._montar_aba_catalogo(self.tab_catalogo)
         self._montar_aba_navegador(self.tab_nav)
         self._montar_aba_meus(self.tab_meus)
+        self._montar_aba_torrent(self.tab_torrent)
+        self._montar_aba_pc(self.tab_pc)
+        self._montar_aba_instalar(self.tab_inst)
         self.tabs.set("🎮 ROMs")
 
         # =================================================================
@@ -794,6 +844,853 @@ class App(ctk.CTk):
         )
         self.meus_scroll.grid(row=1, column=0, sticky="nsew")
         configurar_scroll_fluido(self.meus_scroll, velocidade=4)
+
+    # --------------------------------------------- aba: torrent (.torrent/magnet)
+    def _montar_aba_torrent(self, tab):
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(3, weight=1)
+
+        cartao = ctk.CTkFrame(tab, fg_color=COR_CARD, border_width=1,
+                              border_color=COR_BORDA, corner_radius=12)
+        cartao.grid(row=0, column=0, sticky="ew", pady=(4, 6))
+        cartao.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            cartao, text="🧲 Download via BitTorrent (.torrent, magnet ou URL de .torrent)",
+            font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO,
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(
+            cartao,
+            text="Repacks grandes (ex: FitGirl) vêm em .torrent — escolha o arquivo e inicie.",
+            font=FONTE_PEQ, text_color=COR_TEXTO_FRACO,
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+
+        linha_fonte = ctk.CTkFrame(cartao, fg_color="transparent")
+        linha_fonte.pack(fill="x", padx=14, pady=(0, 6))
+        linha_fonte.grid_columnconfigure(0, weight=1)
+
+        self.ent_torrent_fonte = ctk.CTkEntry(
+            linha_fonte, font=FONTE_NORMAL, height=36,
+            placeholder_text="Caminho do .torrent, magnet: ou URL http de .torrent...",
+            fg_color="#090d16", border_color=COR_BORDA, corner_radius=18,
+        )
+        self.ent_torrent_fonte.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        ctk.CTkButton(
+            linha_fonte, text="📂 Escolher .torrent", width=150, height=36,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=self.acao_escolher_torrent,
+        ).grid(row=0, column=1, padx=(0, 6))
+
+        ctk.CTkButton(
+            linha_fonte, text="🔍 Ver info", width=100, height=36,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=self.acao_info_torrent,
+        ).grid(row=0, column=2)
+
+        linha_dest = ctk.CTkFrame(cartao, fg_color="transparent")
+        linha_dest.pack(fill="x", padx=14, pady=(0, 6))
+        linha_dest.grid_columnconfigure(0, weight=1)
+
+        self.ent_torrent_dest = ctk.CTkEntry(
+            linha_dest, font=FONTE_NORMAL, height=34,
+            fg_color="#090d16", border_color=COR_BORDA, corner_radius=17,
+        )
+        self.ent_torrent_dest.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.ent_torrent_dest.insert(0, str(PASTA_PADRAO))
+
+        ctk.CTkButton(
+            linha_dest, text="📁 Destino", width=100, height=34,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=self.acao_escolher_torrent_dest,
+        ).grid(row=0, column=1)
+
+        botoes = ctk.CTkFrame(cartao, fg_color="transparent")
+        botoes.pack(fill="x", padx=14, pady=(2, 12))
+
+        self.btn_torrent_iniciar = ctk.CTkButton(
+            botoes, text="⬇ Iniciar torrent", height=38,
+            font=FONTE_BOTAO_MINT, fg_color=COR_ROMSGAMES_MINT,
+            text_color=COR_ROMSGAMES_TEXT, hover_color=COR_ROMSGAMES_HOVER,
+            command=self.acao_iniciar_torrent,
+        )
+        self.btn_torrent_iniciar.pack(side="left", padx=(0, 6))
+
+        self.btn_torrent_pausar = ctk.CTkButton(
+            botoes, text="⏸ Pausar", width=100, height=38,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=self.acao_pausar_torrent, state="disabled",
+        )
+        self.btn_torrent_pausar.pack(side="left", padx=(0, 6))
+
+        self.btn_torrent_continuar = ctk.CTkButton(
+            botoes, text="▶ Continuar", width=110, height=38,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=self.acao_continuar_torrent, state="disabled",
+        )
+        self.btn_torrent_continuar.pack(side="left", padx=(0, 6))
+
+        self.btn_torrent_cancelar = ctk.CTkButton(
+            botoes, text="✖ Cancelar", width=100, height=38,
+            fg_color="#7f1d1d", hover_color="#991b1b", text_color="white",
+            command=self.acao_cancelar_torrent, state="disabled",
+        )
+        self.btn_torrent_cancelar.pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            botoes, text="↗ Abrir no cliente externo", height=38,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=self.acao_torrent_externo,
+        ).pack(side="left")
+
+        prog_card = ctk.CTkFrame(tab, fg_color=COR_CARD, border_width=1,
+                                 border_color=COR_BORDA, corner_radius=12)
+        prog_card.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        prog_card.grid_columnconfigure(0, weight=1)
+
+        self.lbl_torrent_estado = ctk.CTkLabel(
+            prog_card, text="Nenhum torrent carregado.", font=FONTE_NORMAL,
+            text_color=COR_TEXTO_FRACO,
+        )
+        self.lbl_torrent_estado.pack(anchor="w", padx=14, pady=(10, 4))
+
+        self.bar_torrent = ctk.CTkProgressBar(
+            prog_card, height=12, corner_radius=6,
+            progress_color=COR_ROMSGAMES_MINT, fg_color="#1e293b",
+        )
+        self.bar_torrent.pack(fill="x", padx=14, pady=(0, 4))
+        self.bar_torrent.set(0.0)
+
+        self.lbl_torrent_detalhes = ctk.CTkLabel(
+            prog_card, text="—", font=FONTE_PEQ, text_color=COR_TEXTO_FRACO,
+        )
+        self.lbl_torrent_detalhes.pack(anchor="w", padx=14, pady=(0, 10))
+
+        self.txt_torrent_info = ctk.CTkTextbox(
+            tab, font=FONTE_MONO_PEQ, fg_color="#070b13",
+            border_width=1, border_color=COR_BORDA, corner_radius=8,
+        )
+        self.txt_torrent_info.grid(row=3, column=0, sticky="nsew", pady=(0, 4))
+        self.txt_torrent_info.insert("1.0", "Info do torrent aparece aqui (nome, tamanho, arquivos, trackers).")
+        self.txt_torrent_info.configure(state="disabled")
+
+    def _torrent_msg(self, texto: str, cor: str = COR_TEXTO_FRACO):
+        self.lbl_torrent_estado.configure(text=texto, text_color=cor)
+
+    def acao_escolher_torrent(self):
+        caminho = filedialog.askopenfilename(
+            title="Escolher arquivo .torrent",
+            filetypes=[("Torrent", "*.torrent"), ("Todos", "*.*")],
+        )
+        if caminho:
+            self.ent_torrent_fonte.delete(0, "end")
+            self.ent_torrent_fonte.insert(0, caminho)
+            self.acao_info_torrent()
+
+    def acao_escolher_torrent_dest(self):
+        pasta = filedialog.askdirectory(title="Pasta de destino do torrent")
+        if pasta:
+            self.ent_torrent_dest.delete(0, "end")
+            self.ent_torrent_dest.insert(0, pasta)
+
+    def acao_info_torrent(self):
+        fonte = self.ent_torrent_fonte.get().strip()
+        if not fonte:
+            messagebox.showwarning("Torrent", "Escolha um .torrent ou cole um magnet primeiro.")
+            return
+        if is_magnet(fonte) or is_torrent_url(fonte):
+            self.torrent_info = None
+            self._torrent_msg("Magnet/URL pronto para iniciar (info detalhada vem no download).")
+            self._mostrar_torrent_texto(
+                f"Fonte: {fonte[:200]}\n"
+                "(magnet/URL: nome e tamanho aparecem apos buscar metadados.)")
+            return
+        try:
+            info = parse_torrent(fonte)
+        except Exception as e:
+            messagebox.showerror("Torrent", f"Não foi possível ler o .torrent:\n{e}")
+            return
+        self.torrent_info = info
+        gb = info["tamanho"] / 1024 ** 3
+        self._torrent_msg(f"✔ {info['nome']} — {gb:.2f} GB em {info['num_arquivos']} arquivo(s)",
+                          COR_ROMSGAMES_MINT)
+        linhas = [f"Nome: {info['nome']}",
+                   f"Tamanho: {gb:.2f} GB ({info['tamanho']} bytes)",
+                   f"Arquivos: {info['num_arquivos']} | Trackers: {len(info['trackers'])}",
+                   f"Info-hash: {info['info_hash']}", ""]
+        for f in info["arquivos"][:30]:
+            linhas.append(f"  - {f['caminho']} ({f['bytes'] / 1024 / 1024:.1f} MB)")
+        if info["num_arquivos"] > 30:
+            linhas.append(f"  ... e mais {info['num_arquivos'] - 30}")
+        self._mostrar_torrent_texto("\n".join(linhas))
+
+    def _mostrar_torrent_texto(self, texto: str):
+        try:
+            self.txt_torrent_info.configure(state="normal")
+            self.txt_torrent_info.delete("1.0", "end")
+            self.txt_torrent_info.insert("1.0", texto)
+            self.txt_torrent_info.configure(state="disabled")
+        except Exception:
+            pass
+
+    def acao_iniciar_torrent(self):
+        if self.torrent_rodando:
+            messagebox.showinfo("Torrent", "Já há um torrent em andamento.")
+            return
+        fonte = self.ent_torrent_fonte.get().strip()
+        dest = self.ent_torrent_dest.get().strip() or str(PASTA_PADRAO)
+        if not fonte:
+            messagebox.showwarning("Torrent", "Escolha um .torrent ou cole um magnet primeiro.")
+            return
+        if not libtorrent_disponivel():
+            messagebox.showerror(
+                "Torrent",
+                "Motor libtorrent não instalado.\n\n"
+                "Opção 1: pip install libtorrent (e reinicie o app)\n"
+                "Opção 2: clique em 'Abrir no cliente externo'\n"
+                "para baixar no qBittorrent/Transmission.",
+            )
+            return
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        self.torrent_fonte = fonte
+        self.torrent_controle = ControleDownload()
+        self.torrent_rodando = True
+        self.torrent_rec, self.torrent_tot = 0, 0
+        self._torrent_ui_ocupado()
+        self.bar_torrent.set(0.0)
+        self._torrent_msg("⏳ Conectando aos peers/DHT...", COR_AZUL)
+        self.set_status("Baixando torrent...", COR_ROMSGAMES_MINT)
+        self.rodar_em_thread(self._torrent_bg)
+
+    def _torrent_ui_ocupado(self):
+        self.btn_torrent_iniciar.configure(state="disabled")
+        self.btn_torrent_pausar.configure(state="normal")
+        self.btn_torrent_cancelar.configure(state="normal")
+        self.btn_torrent_continuar.configure(state="disabled")
+
+    def _torrent_bg(self):
+        fonte, dest = self.torrent_fonte, self.ent_torrent_dest.get().strip()
+
+        def prog(rec, tot):
+            self.torrent_rec, self.torrent_tot = rec, tot or 0
+            self.emit(self._torrent_atualizar_barra)
+
+        def logm(m):
+            self.emit(lambda: self._torrent_msg(m))
+
+        try:
+            final = download_torrent(fonte, dest, callback_progress=prog,
+                                     callback_log=logm, controle=self.torrent_controle)
+        except DownloadCancelado:
+            self.emit(lambda: self._torrent_fim("✕ Torrent cancelado.", COR_TEXTO_FRACO))
+            return
+        except Exception as e:
+            err = str(e)[:300]
+            self.emit(lambda: self._torrent_fim(f"❌ Falha no torrent: {err}", COR_VERMELHO))
+            return
+        self.emit(lambda: self._torrent_fim(f"✅ Concluído: {final}", COR_ROMSGAMES_MINT))
+        self.emit(self.acao_atualizar_meus)
+
+    def _torrent_atualizar_barra(self):
+        try:
+            rec, tot = self.torrent_rec, self.torrent_tot
+            if tot:
+                frac = rec / tot
+                self.bar_torrent.set(max(0.0, min(1.0, frac)))
+                self.lbl_torrent_detalhes.configure(
+                    text=f"{formatar_velocidade(0)}  •  {formatar_bytes(rec)} de {formatar_bytes(tot)}"
+                         f"  •  {int(frac * 100)}%  •  destino: {self.ent_torrent_dest.get().strip()}")
+                self._torrent_msg(f"⚡ Baixando torrent... {int(frac * 100)}%", COR_ROMSGAMES_MINT)
+            elif rec:
+                self.lbl_torrent_detalhes.configure(text=f"{formatar_bytes(rec)} baixados (buscando metadados...)")
+        except Exception:
+            pass
+
+    def _torrent_fim(self, texto: str, cor: str):
+        self.torrent_rodando = False
+        self._torrent_msg(texto, cor)
+        self.btn_torrent_iniciar.configure(state="normal")
+        self.btn_torrent_pausar.configure(state="disabled")
+        self.btn_torrent_continuar.configure(state="disabled")
+        self.btn_torrent_cancelar.configure(state="disabled")
+        if "Concluído" in texto:
+            self.bar_torrent.set(1.0)
+        self.set_status("Online", COR_ROMSGAMES_MINT)
+
+    def acao_pausar_torrent(self):
+        if self.torrent_controle and self.torrent_rodando:
+            self.torrent_controle.pausar()
+            self.btn_torrent_pausar.configure(state="disabled")
+            self.btn_torrent_continuar.configure(state="normal")
+            self._torrent_msg("⏸ Torrent pausado.", COR_AMBAR)
+
+    def acao_continuar_torrent(self):
+        if self.torrent_controle and self.torrent_rodando:
+            self.torrent_controle.continuar()
+            self.btn_torrent_pausar.configure(state="normal")
+            self.btn_torrent_continuar.configure(state="disabled")
+            self._torrent_msg("⚡ Baixando torrent...", COR_ROMSGAMES_MINT)
+
+    def acao_cancelar_torrent(self):
+        if self.torrent_controle and self.torrent_rodando:
+            self.torrent_controle.cancelar()
+
+    def acao_torrent_externo(self):
+        fonte = self.ent_torrent_fonte.get().strip()
+        if not fonte:
+            messagebox.showwarning("Torrent", "Escolha um .torrent ou cole um magnet primeiro.")
+            return
+        try:
+            msg = abrir_com_cliente_externo(fonte)
+            self._torrent_msg(msg, COR_ROMSGAMES_MINT)
+        except Exception as e:
+            messagebox.showerror("Torrent", str(e))
+
+    # --------------------------------------------- aba: PC (GamesTorrents)
+    def _montar_aba_pc(self, tab):
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1)
+
+        cartao = ctk.CTkFrame(tab, fg_color=COR_CARD, border_width=1,
+                              border_color=COR_BORDA, corner_radius=12)
+        cartao.grid(row=0, column=0, sticky="ew", pady=(4, 6))
+        cartao.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            cartao, text="🖥️ Jogos PC via GamesTorrents (torrent direto, sem cliente externo)",
+            font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO,
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(
+            cartao, text="Busque, abra o jogo e baixe o release — o app resolve o anti-bot e baixa sozinho.",
+            font=FONTE_PEQ, text_color=COR_TEXTO_FRACO,
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+
+        linha_busca = ctk.CTkFrame(cartao, fg_color="transparent")
+        linha_busca.pack(fill="x", padx=14, pady=(0, 6))
+        linha_busca.grid_columnconfigure(0, weight=1)
+
+        self.ent_gt_busca = ctk.CTkEntry(
+            linha_busca, font=FONTE_NORMAL, height=36,
+            placeholder_text="🔍 Buscar jogo PC... (ex: demon slayer, gta, elden ring)",
+            fg_color="#090d16", border_color=COR_BORDA, corner_radius=18,
+        )
+        self.ent_gt_busca.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.ent_gt_busca.bind("<Return>", lambda _e: self.acao_gt_buscar())
+
+        ctk.CTkButton(
+            linha_busca, text="Buscar", width=100, height=36,
+            fg_color=COR_ROMSGAMES_MINT, text_color=COR_ROMSGAMES_TEXT,
+            hover_color=COR_ROMSGAMES_HOVER, font=FONTE_BOTAO_MINT,
+            command=self.acao_gt_buscar,
+        ).grid(row=0, column=1)
+
+        linha_nav = ctk.CTkFrame(cartao, fg_color="transparent")
+        linha_nav.pack(fill="x", padx=14, pady=(0, 12))
+
+        ctk.CTkButton(
+            linha_nav, text="◀", width=38, height=32,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=lambda: self.acao_gt_pagina(-1),
+        ).pack(side="left", padx=(0, 4))
+
+        self.lbl_gt_pag = ctk.CTkLabel(
+            linha_nav, text="Catálogo: pág. 1", font=FONTE_PEQ, text_color=COR_TEXTO_FRACO,
+        )
+        self.lbl_gt_pag.pack(side="left", padx=6)
+
+        ctk.CTkButton(
+            linha_nav, text="▶", width=38, height=32,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=lambda: self.acao_gt_pagina(1),
+        ).pack(side="left", padx=(0, 12))
+
+        ctk.CTkButton(
+            linha_nav, text="📑 Carregar catálogo", height=32,
+            fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+            command=lambda: self.acao_gt_pagina(0),
+        ).pack(side="left")
+
+        self.lbl_gt_info = ctk.CTkLabel(
+            linha_nav, text="", font=FONTE_PEQ, text_color=COR_TEXTO_FRACO,
+        )
+        self.lbl_gt_info.pack(side="left", padx=(12, 0))
+
+        meio = ctk.CTkFrame(tab, fg_color="transparent")
+        meio.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        meio.grid_columnconfigure(0, weight=1)
+        meio.grid_columnconfigure(1, weight=1)
+
+        self.gt_scroll = ctk.CTkScrollableFrame(
+            meio, fg_color="#070b13", border_width=1, border_color=COR_BORDA,
+            corner_radius=8, height=220,
+        )
+        self.gt_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        configurar_scroll_fluido(self.gt_scroll, velocidade=4)
+
+        self.gt_rel_scroll = ctk.CTkScrollableFrame(
+            meio, fg_color="#070b13", border_width=1, border_color=COR_BORDA,
+            corner_radius=8, height=220,
+        )
+        self.gt_rel_scroll.grid(row=0, column=1, sticky="nsew")
+        configurar_scroll_fluido(self.gt_rel_scroll, velocidade=4)
+
+        self.lbl_gt_status = ctk.CTkLabel(
+            tab, text="Busque um jogo ou carregue o catálogo.",
+            font=FONTE_PEQ, text_color=COR_TEXTO_FRACO,
+        )
+        self.lbl_gt_status.grid(row=2, column=0, sticky="w", pady=(0, 4))
+
+    def _gt_status(self, texto: str, cor: str = COR_TEXTO_FRACO):
+        try:
+            self.lbl_gt_status.configure(text=texto, text_color=cor)
+        except Exception:
+            pass
+
+    def acao_gt_buscar(self):
+        termo = self.ent_gt_busca.get().strip()
+        if not termo:
+            messagebox.showwarning("Jogos PC", "Digite o nome do jogo para buscar.")
+            return
+        self._gt_status(f"⏳ Buscando '{termo}' no GamesTorrents...", COR_AZUL)
+        self.rodar_em_thread(lambda: self._gt_buscar_bg(termo))
+
+    def _gt_buscar_bg(self, termo: str):
+        try:
+            res = gt_buscar(termo)
+        except Exception as e:
+            self.emit(lambda: self._gt_status(f"❌ Falha na busca: {e}", COR_VERMELHO))
+            return
+        self.emit(lambda: self._gt_mostrar_lista(res, f"{len(res)} resultado(s) para '{termo}'"))
+
+    def acao_gt_pagina(self, delta: int):
+        self.gt_pagina = max(1, self.gt_pagina + delta)
+        self._gt_status(f"⏳ Carregando catálogo (pág. {self.gt_pagina})...", COR_AZUL)
+        self.rodar_em_thread(lambda: self._gt_pagina_bg(self.gt_pagina))
+
+    def _gt_pagina_bg(self, pagina: int):
+        try:
+            jogos, total = gt_listar(pagina)
+        except Exception as e:
+            self.emit(lambda: self._gt_status(f"❌ Falha no catálogo: {e}", COR_VERMELHO))
+            return
+        self.gt_total = total
+        self.emit(lambda: self._gt_mostrar_lista(jogos, f"Catálogo: pág. {pagina}/{total}"))
+        self.emit(lambda: self.lbl_gt_pag.configure(text=f"Catálogo: pág. {pagina}/{total}"))
+
+    def _gt_mostrar_lista(self, jogos: list, info: str):
+        self.gt_resultados = jogos
+        for w in self.gt_scroll.winfo_children():
+            w.destroy()
+        self.lbl_gt_info.configure(text=info)
+        self._gt_status(info)
+        if not jogos:
+            ctk.CTkLabel(self.gt_scroll, text="Nenhum jogo encontrado.",
+                         font=FONTE_NORMAL, text_color=COR_AMBAR).pack(padx=10, pady=24)
+            return
+        for j in jogos:
+            linha = ctk.CTkFrame(self.gt_scroll, fg_color=COR_CARD, border_width=1,
+                                 border_color=COR_BORDA, corner_radius=8)
+            linha.pack(fill="x", padx=8, pady=3)
+            tit = j["titulo"] if len(j["titulo"]) <= 44 else j["titulo"][:43] + "…"
+            ano = f" ({j['ano']})" if j.get("ano") else ""
+            ctk.CTkLabel(linha, text="🎮 " + tit + ano, font=FONTE_NORMAL,
+                         text_color=COR_TEXTO).pack(side="left", padx=10)
+            ctk.CTkButton(
+                linha, text="Ver ↧", width=70, height=28,
+                fg_color=COR_ROMSGAMES_MINT, text_color=COR_ROMSGAMES_TEXT,
+                hover_color=COR_ROMSGAMES_HOVER, font=FONTE_PEQ,
+                command=lambda u=j["url"]: self.acao_gt_ver(u),
+            ).pack(side="right", padx=8, pady=4)
+
+    def acao_gt_ver(self, url: str):
+        self._gt_status("⏳ Abrindo jogo (lendo releases)...", COR_AZUL)
+        for w in self.gt_rel_scroll.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self.gt_rel_scroll, text="⏳ Carregando releases...",
+                     font=FONTE_NORMAL, text_color=COR_TEXTO_FRACO).pack(padx=10, pady=24)
+        self.rodar_em_thread(lambda: self._gt_ver_bg(url))
+
+    def _gt_ver_bg(self, url: str):
+        try:
+            d = gt_detalhes(url)
+        except Exception as e:
+            self.emit(lambda: self._gt_status(f"❌ Falha ao abrir: {e}", COR_VERMELHO))
+            return
+        self.emit(lambda: self._gt_mostrar_releases(d))
+
+    def _gt_mostrar_releases(self, d: dict):
+        self.gt_releases = d.get("releases", [])
+        self.gt_titulo = d.get("titulo", "?")
+        for w in self.gt_rel_scroll.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self.gt_rel_scroll, text=f"📦 {self.gt_titulo}",
+                     font=("Segoe UI", 11, "bold"), text_color=COR_ROMSGAMES_MINT,
+                     wraplength=320, justify="left").pack(anchor="w", padx=10, pady=(8, 4))
+        if not self.gt_releases:
+            ctk.CTkLabel(self.gt_rel_scroll, text="Sem releases com torrent.",
+                         font=FONTE_NORMAL, text_color=COR_AMBAR).pack(padx=10, pady=12)
+            return
+        for rel in self.gt_releases:
+            card = ctk.CTkFrame(self.gt_rel_scroll, fg_color=COR_CARD, border_width=1,
+                                border_color=COR_BORDA, corner_radius=8)
+            card.pack(fill="x", padx=8, pady=3)
+            txt = f"{rel['fonte']} {rel['versao']} • {rel['tamanho']}".strip()
+            ctk.CTkLabel(card, text="🧲 " + txt, font=FONTE_PEQ,
+                         text_color=COR_TEXTO).pack(anchor="w", padx=10, pady=(6, 0))
+            if rel.get("idiomas"):
+                ctk.CTkLabel(card, text=rel["idiomas"], font=FONTE_PEQ,
+                             text_color=COR_TEXTO_FRACO).pack(anchor="w", padx=10)
+            ctk.CTkButton(
+                card, text="⬇ Baixar torrent", height=30,
+                fg_color=COR_ROMSGAMES_MINT, text_color=COR_ROMSGAMES_TEXT,
+                hover_color=COR_ROMSGAMES_HOVER, font=FONTE_PEQ,
+                command=lambda r=rel: self.acao_gt_baixar(r),
+            ).pack(fill="x", padx=10, pady=(4, 8))
+        self._gt_status(f"{len(self.gt_releases)} release(s) — escolha um para baixar.")
+
+    def acao_gt_baixar(self, release: dict):
+        if self.torrent_rodando:
+            messagebox.showinfo("Jogos PC", "Já há um torrent em andamento (veja a aba 🧲 Torrent).")
+            return
+        if not libtorrent_disponivel():
+            messagebox.showerror(
+                "Jogos PC",
+                "Motor libtorrent não instalado.\nRode: pip install libtorrent",
+            )
+            return
+        if not (release.get("torrent_url") or release.get("magnet_url")):
+            messagebox.showwarning("Jogos PC", "Release sem link de descarga.")
+            return
+        dest = self.ent_torrent_dest.get().strip() if hasattr(self, "ent_torrent_dest") else str(PASTA_PADRAO)
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        self.torrent_controle = ControleDownload()
+        self.torrent_rodando = True
+        self.torrent_rec, self.torrent_tot = 0, 0
+        self._torrent_ui_ocupado()
+        self._gt_status(f"⏳ Resolvendo anti-bot p/ {release['fonte']} {release['versao']}...",
+                        COR_AZUL)
+        self.seg_abas.set("🧲 Torrent")
+        self._aba_mudou_seg("🧲 Torrent")
+        self._torrent_msg("⏳ Resolvendo GamesTorrents (verificação + peers)...", COR_AZUL)
+        self.set_status("Baixando torrent...", COR_ROMSGAMES_MINT)
+        self.rodar_em_thread(lambda: self._gt_baixar_bg(release, dest))
+
+    def _gt_baixar_bg(self, release: dict, dest: str):
+        def prog(rec, tot):
+            self.torrent_rec, self.torrent_tot = rec, tot or 0
+            self.emit(self._torrent_atualizar_barra)
+
+        def logm(m):
+            self.emit(lambda: self._torrent_msg(m))
+            self.emit(lambda: self._gt_status(m))
+
+        try:
+            final = baixar_release(release, dest, controle=self.torrent_controle,
+                                   callback_log=logm, callback_progress=prog)
+        except DownloadCancelado:
+            self.emit(lambda: self._torrent_fim("✕ Torrent cancelado.", COR_TEXTO_FRACO))
+            return
+        except Exception as e:
+            err = str(e)[:300]
+            self.emit(lambda: self._torrent_fim(f"❌ Falha: {err}", COR_VERMELHO))
+            self.emit(lambda: self._gt_status(f"❌ Falha: {err}", COR_VERMELHO))
+            return
+        self.emit(lambda: self._torrent_fim(f"✅ Concluído: {final}", COR_ROMSGAMES_MINT))
+        self.emit(lambda: self._gt_status(f"✅ Concluído: {final}", COR_ROMSGAMES_MINT))
+        self.emit(self.acao_atualizar_meus)
+
+    # --------------------------------------------- aba: instalar (analise+setup)
+    def _montar_aba_instalar(self, tab):
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(3, weight=1)
+
+        # 1. Analise
+        c1 = ctk.CTkFrame(tab, fg_color=COR_CARD, border_width=1,
+                          border_color=COR_BORDA, corner_radius=12)
+        c1.grid(row=0, column=0, sticky="ew", pady=(4, 6))
+        c1.grid_columnconfigure(0, weight=1)
+        topo1 = ctk.CTkFrame(c1, fg_color="transparent")
+        topo1.pack(fill="x", padx=14, pady=(10, 2))
+        ctk.CTkLabel(topo1, text="🛡️ 1. Analisar o setup.exe (Defender + assinatura + estrutura)",
+                     font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO).pack(side="left")
+        self.pill_inst_veredito = ctk.CTkLabel(
+            topo1, text="NÃO ANALISADO", font=("Segoe UI", 9, "bold"),
+            fg_color="#1e293b", text_color=COR_TEXTO_FRACO,
+            corner_radius=6, padx=8, pady=1)
+        self.pill_inst_veredito.pack(side="left", padx=8)
+
+        lin_setup = ctk.CTkFrame(c1, fg_color="transparent")
+        lin_setup.pack(fill="x", padx=14, pady=(0, 6))
+        lin_setup.grid_columnconfigure(0, weight=1)
+        self.ent_inst_setup = ctk.CTkEntry(
+            lin_setup, font=FONTE_NORMAL, height=36,
+            placeholder_text="Caminho do setup.exe do jogo...",
+            fg_color="#090d16", border_color=COR_BORDA, corner_radius=18)
+        self.ent_inst_setup.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkButton(lin_setup, text="📂 Escolher", width=100, height=36,
+                      fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+                      command=self.acao_inst_escolher).grid(row=0, column=1, padx=(0, 6))
+        ctk.CTkButton(lin_setup, text="🔍 Localizar", width=100, height=36,
+                      fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+                      command=self.acao_inst_localizar).grid(row=0, column=2, padx=(0, 6))
+        self.btn_inst_analisar = ctk.CTkButton(
+            lin_setup, text="▶ Analisar", width=110, height=36,
+            fg_color=COR_ROMSGAMES_MINT, text_color=COR_ROMSGAMES_TEXT,
+            hover_color=COR_ROMSGAMES_HOVER, font=FONTE_BOTAO_MINT,
+            command=self.acao_inst_analisar)
+        self.btn_inst_analisar.grid(row=0, column=3)
+
+        # 2. Dependencias
+        c2 = ctk.CTkFrame(tab, fg_color=COR_CARD, border_width=1,
+                          border_color=COR_BORDA, corner_radius=12)
+        c2.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        lin_dep = ctk.CTkFrame(c2, fg_color="transparent")
+        lin_dep.pack(fill="x", padx=14, pady=(10, 6))
+        ctk.CTkLabel(lin_dep, text="🧩 2. Dependências (DirectX, VC++, .NET)",
+                     font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO).pack(side="left")
+        ctk.CTkButton(lin_dep, text="🔄 Verificar", width=110, height=30,
+                      fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+                      command=self.acao_inst_verificar_deps).pack(side="right")
+        self.frm_inst_deps = ctk.CTkFrame(c2, fg_color="transparent")
+        self.frm_inst_deps.pack(fill="x", padx=14, pady=(0, 10))
+
+        # 3. Instalacao
+        c3 = ctk.CTkFrame(tab, fg_color=COR_CARD, border_width=1,
+                          border_color=COR_BORDA, corner_radius=12)
+        c3.grid(row=2, column=0, sticky="ew", pady=(0, 6))
+        c3.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(c3, text="💾 3. Escolha onde instalar e instale",
+                     font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO).pack(
+                         anchor="w", padx=14, pady=(10, 2))
+        lin_dest = ctk.CTkFrame(c3, fg_color="transparent")
+        lin_dest.pack(fill="x", padx=14, pady=(0, 6))
+        lin_dest.grid_columnconfigure(0, weight=1)
+        self.ent_inst_dest = ctk.CTkEntry(
+            lin_dest, font=FONTE_NORMAL, height=34,
+            fg_color="#090d16", border_color=COR_BORDA, corner_radius=17)
+        self.ent_inst_dest.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.ent_inst_dest.insert(0, r"C:\Jogos")
+        ctk.CTkButton(lin_dest, text="📁 Escolher pasta", width=130, height=34,
+                      fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+                      command=self.acao_inst_dest).grid(row=0, column=1)
+        lin_go = ctk.CTkFrame(c3, fg_color="transparent")
+        lin_go.pack(fill="x", padx=14, pady=(0, 12))
+        self.var_inst_silencioso = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(lin_go, text="Instalação silenciosa", variable=self.var_inst_silencioso,
+                        font=FONTE_PEQ, checkbox_height=18, checkbox_width=18,
+                        corner_radius=4, border_color=COR_BORDA).pack(side="left", padx=(0, 12))
+        self.var_inst_atalho = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(lin_go, text="Atalho na Área de Trabalho", variable=self.var_inst_atalho,
+                        font=FONTE_PEQ, checkbox_height=18, checkbox_width=18,
+                        corner_radius=4, border_color=COR_BORDA).pack(side="left", padx=(0, 12))
+        self.btn_inst_jogo = ctk.CTkButton(
+            lin_go, text="▶ Instalar jogo", height=36,
+            fg_color=COR_ROMSGAMES_MINT, text_color=COR_ROMSGAMES_TEXT,
+            hover_color=COR_ROMSGAMES_HOVER, font=FONTE_BOTAO_MINT,
+            command=self.acao_inst_jogo)
+        self.btn_inst_jogo.pack(side="left", padx=(0, 6))
+        ctk.CTkButton(lin_go, text="📁 Abrir pasta do jogo", height=36,
+                      fg_color=COR_CARD, border_width=1, border_color=COR_BORDA,
+                      command=self.acao_inst_abrir).pack(side="left")
+
+        self.txt_inst_rel = ctk.CTkTextbox(
+            tab, font=FONTE_MONO_PEQ, fg_color="#070b13",
+            border_width=1, border_color=COR_BORDA, corner_radius=8)
+        self.txt_inst_rel.grid(row=3, column=0, sticky="nsew", pady=(0, 4))
+        self.txt_inst_rel.insert("1.0", "Relatório da análise e log da instalação aparecem aqui.")
+        self.txt_inst_rel.configure(state="disabled")
+        self.acao_inst_verificar_deps()
+
+    def _inst_log(self, texto: str):
+        try:
+            self.txt_inst_rel.configure(state="normal")
+            self.txt_inst_rel.insert("end", "\n" + texto)
+            self.txt_inst_rel.see("end")
+            self.txt_inst_rel.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _inst_relatorio(self, texto: str):
+        try:
+            self.txt_inst_rel.configure(state="normal")
+            self.txt_inst_rel.delete("1.0", "end")
+            self.txt_inst_rel.insert("1.0", texto)
+            self.txt_inst_rel.configure(state="disabled")
+        except Exception:
+            pass
+
+    def acao_inst_escolher(self):
+        caminho = filedialog.askopenfilename(
+            title="Escolher setup.exe do jogo",
+            filetypes=[("Setup", "setup*.exe"), ("Executáveis", "*.exe"), ("Todos", "*.*")])
+        if caminho:
+            self.ent_inst_setup.delete(0, "end")
+            self.ent_inst_setup.insert(0, caminho)
+            base = Path(caminho).parent.name
+            dest = Path(self.ent_inst_dest.get().strip() or r"C:\Jogos") / base
+            self.ent_inst_dest.delete(0, "end")
+            self.ent_inst_dest.insert(0, str(dest))
+
+    def acao_inst_localizar(self):
+        achados = localizar_setups([self.pasta_downloads(), str(Path("dist") / "downloads")])
+        if not achados:
+            messagebox.showinfo("Instalar", "Nenhum setup*.exe nas pastas de download.")
+            return
+        self.ent_inst_setup.delete(0, "end")
+        self.ent_inst_setup.insert(0, str(achados[0]))
+        base = achados[0].parent.name
+        dest = Path(self.ent_inst_dest.get().strip() or r"C:\Jogos") / base
+        self.ent_inst_dest.delete(0, "end")
+        self.ent_inst_dest.insert(0, str(dest))
+        extras = "\n".join(f"  - {a}" for a in achados[1:6])
+        self._inst_relatorio(f"Setups encontrados:\n  - {achados[0]}" + (f"\n{extras}" if extras else ""))
+
+    def acao_inst_analisar(self):
+        setup = self.ent_inst_setup.get().strip()
+        if not setup or not Path(setup).exists():
+            messagebox.showwarning("Instalar", "Escolha um setup.exe válido primeiro.")
+            return
+        self.btn_inst_analisar.configure(state="disabled", text="⏳ Analisando...")
+        self.pill_inst_veredito.configure(text="ANALISANDO...", fg_color="#0284c7", text_color="white")
+        self.rodar_em_thread(lambda: self._inst_analisar_bg(setup))
+
+    def _inst_analisar_bg(self, setup: str):
+        try:
+            rep = analisar_setup(setup, callback_log=lambda m: self.emit(lambda: self._inst_log(m)))
+        except Exception as e:
+            err = str(e)[:200]
+            self.emit(lambda: (self.btn_inst_analisar.configure(state="normal", text="▶ Analisar"),
+                               self.pill_inst_veredito.configure(text="ERRO", fg_color="#7f1d1d",
+                                                                 text_color="white"),
+                               self._inst_log(f"❌ Falha na análise: {err}")))
+            return
+        self.emit(lambda: self._inst_mostrar_rep(rep))
+
+    def _inst_mostrar_rep(self, rep: dict):
+        self.btn_inst_analisar.configure(state="normal", text="▶ Analisar")
+        self._inst_relatorio(texto_relatorio(rep))
+        v = rep.get("veredito", "")
+        cor = {"ok": "#064e3b", "atencao": "#92400e", "ameaca": "#7f1d1d"}.get(v, "#1e293b")
+        txt = {"ok": "✅ LIMPO", "atencao": "⚠️ ATENÇÃO", "ameaca": "⛔ AMEAÇA"}.get(v, "❓ INCONCLUSIVO")
+        self.pill_inst_veredito.configure(text=txt, fg_color=cor, text_color="white")
+        if v == "ameaca":
+            messagebox.showerror("Análise", "O Defender encontrou ameaça. NÃO instale este jogo.")
+        elif v == "ok":
+            messagebox.showinfo("Análise", "Setup limpo no Defender. Pode instalar.")
+
+    def acao_inst_verificar_deps(self):
+        try:
+            self.inst_deps = detectar_dependencias()
+        except Exception as e:
+            self._inst_log(f"❌ Falha ao verificar dependências: {e}")
+            return
+        self._render_deps()
+
+    def _render_deps(self):
+        if not hasattr(self, "frm_inst_deps"):
+            return
+        for w in self.frm_inst_deps.winfo_children():
+            w.destroy()
+        for dep in self.inst_deps:
+            linha = ctk.CTkFrame(self.frm_inst_deps, fg_color="transparent")
+            linha.pack(fill="x", pady=2)
+            if dep.get("instalado"):
+                ctk.CTkLabel(linha, text="✅", font=FONTE_NORMAL).pack(side="left", padx=(0, 6))
+                ctk.CTkLabel(linha, text=f"{dep['nome']} — {dep.get('detalhe', 'instalado')}",
+                             font=FONTE_PEQ, text_color=COR_VERDE_TXT).pack(side="left")
+            else:
+                ctk.CTkLabel(linha, text="⬜", font=FONTE_NORMAL).pack(side="left", padx=(0, 6))
+                ctk.CTkLabel(linha, text=f"{dep['nome']} — ausente",
+                             font=FONTE_PEQ, text_color=COR_AMBAR).pack(side="left")
+                ctk.CTkButton(linha, text="⬇ Instalar", width=90, height=26,
+                              fg_color=COR_ROMSGAMES_MINT, text_color=COR_ROMSGAMES_TEXT,
+                              hover_color=COR_ROMSGAMES_HOVER, font=FONTE_PEQ,
+                              command=lambda d=dep: self.acao_inst_dep(d)).pack(side="right")
+
+    def acao_inst_dep(self, dep: dict):
+        if self.inst_rodando:
+            messagebox.showinfo("Dependências", "Aguarde a operação atual terminar.")
+            return
+        if not messagebox.askyesno("Dependência",
+                                    f"Baixar e instalar {dep['nome']} da fonte oficial Microsoft?"):
+            return
+        self.inst_rodando = True
+        self._inst_log(f"▶ Instalando {dep['nome']}...")
+        self.rodar_em_thread(lambda: self._inst_dep_bg(dep))
+
+    def _inst_dep_bg(self, dep: dict):
+        try:
+            instalar_dependencia(dict(dep), callback_log=lambda m: self.emit(lambda: self._inst_log(m)))
+        except Exception as e:
+            self.emit(lambda: self._inst_log(f"❌ {dep['nome']}: {e}"))
+        else:
+            self.emit(lambda: self._inst_log(f"✅ {dep['nome']} instalado."))
+        finally:
+            self.inst_rodando = False
+            self.emit(self.acao_inst_verificar_deps)
+
+    def acao_inst_dest(self):
+        pasta = filedialog.askdirectory(title="Onde instalar o jogo")
+        if pasta:
+            self.ent_inst_dest.delete(0, "end")
+            self.ent_inst_dest.insert(0, pasta)
+
+    def acao_inst_jogo(self):
+        setup = self.ent_inst_setup.get().strip()
+        dest = self.ent_inst_dest.get().strip()
+        if not setup or not Path(setup).exists():
+            messagebox.showwarning("Instalar", "Escolha um setup.exe válido primeiro.")
+            return
+        if not dest:
+            messagebox.showwarning("Instalar", "Escolha a pasta de instalação.")
+            return
+        if self.inst_rodando:
+            messagebox.showinfo("Instalar", "Já há uma operação em andamento.")
+            return
+        texto = (f"Instalar o jogo em:\n{dest}\n\n"
+                 "Repaks FitGirl demoram de 10 min a 1h+. Continuar?")
+        if not messagebox.askyesno("Instalar jogo", texto):
+            return
+        self.inst_rodando = True
+        self.btn_inst_jogo.configure(state="disabled", text="⏳ Instalando...")
+        sil = self.var_inst_silencioso.get()
+        self.rodar_em_thread(lambda: self._inst_jogo_bg(setup, dest, sil))
+
+    def _inst_jogo_bg(self, setup: str, dest: str, silencioso: bool):
+        try:
+            res = instalar_jogo(setup, dest, silencioso,
+                                callback_log=lambda m: self.emit(lambda: self._inst_log(m)))
+        except Exception as e:
+            self.emit(lambda: self._inst_log(f"❌ Falha na instalação: {e}"))
+            self.emit(lambda: self.btn_inst_jogo.configure(state="normal", text="▶ Instalar jogo"))
+            self.inst_rodando = False
+            return
+        self.inst_destino_final = res["destino"]
+        self.emit(lambda: self._inst_log(f"✅ Jogo instalado em {res['destino']}"))
+        if res.get("desinstalador"):
+            self.emit(lambda: self._inst_log(f"Desinstalador: {res['desinstalador']}"))
+        if self.var_inst_atalho.get():
+            try:
+                cand = [p for p in Path(res["destino"]).glob("*.exe")
+                        if p.is_file() and not p.name.lower().startswith("unins")]
+                exe_alvo = max(cand, key=lambda p: p.stat().st_size) if cand else Path(setup)
+                lnk = criar_atalho(exe_alvo, Path(res["destino"]).name)
+                self.emit(lambda: self._inst_log(f"Atalho criado: {lnk}"))
+            except Exception as e:
+                self.emit(lambda: self._inst_log(f"Atalho não criado: {e}"))
+        self.emit(lambda: self.btn_inst_jogo.configure(state="normal", text="▶ Instalar jogo"))
+        self.emit(lambda: messagebox.showinfo("Instalar", f"Jogo instalado em:\n{res['destino']}"))
+        self.inst_rodando = False
+
+    def acao_inst_abrir(self):
+        pasta = self.inst_destino_final or self.ent_inst_dest.get().strip()
+        if not pasta or not Path(pasta).exists():
+            messagebox.showwarning("Instalar", "Pasta do jogo ainda não existe.")
+            return
+        try:
+            abrir_pasta(pasta)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível abrir a pasta: {e}")
 
     # --------------------------------------------- ponte thread-safe p/ UI
     def emit(self, fn):
